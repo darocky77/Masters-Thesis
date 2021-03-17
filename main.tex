@@ -1,0 +1,120 @@
+\documentclass{uathesis}
+% v0.1
+%  20/06/2013 - first draft of chapters
+%  
+%
+\usepackage[pdftex]{graphicx}
+\usepackage{mathptmx} % Use the Adobe Times Roman as the default text font together with math symbols from the Symbol, Chancery and Computer Modern fonts
+
+\usepackage{xcolor} % Required for specifying colors by name
+\definecolor{ocre}{RGB}{52,177,201} % Define the orange color used for highlighting throughout the book
+
+\usepackage{microtype} % Slightly tweak font spacing for aesthetics
+\usepackage[utf8]{inputenc} % Required for including letters with accents
+\usepackage[T1]{fontenc} % Use 8-bit encoding that has 256 glyphs
+\usepackage{listings}
+%\usepackage[backend=bibtex,style=verbose-trad2]{biblatex}
+
+% \usepackage[style=alphabetic,sorting=nyt,sortcites=true,autopunct=true,babel=hyphen,hyperref=true,abbreviate=false,backref=true,backend=biber]{biblatex}
+%\addbibresource{bibliography.bib} 
+% BibTeX bibliography file
+% \defbibheading{bibempty}{}
+%usepackage to attach appendices
+\usepackage[toc,page]{appendix}
+%\usepackage{minted}
+\usepackage{rotating}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage{algorithm,
+						algpseudocode,
+            amsfonts,
+            amsmath,
+            amssymb,
+            amsthm,
+						adjustbox,
+						blindtext,
+						calc,
+						color, 
+						colortbl,
+						epstopdf,
+						fancyhdr,
+						float,
+						longtable,
+						lastpage,
+						latexsym,
+						listings,
+						multirow,
+						makeidx,
+						pbox,
+						pseudocode,
+						placeins,
+						setspace,
+						subcaption,
+						%tabularx,
+						titlesec,
+            url,
+            varwidth,
+            wrapfig,
+						xspace
+            }
+\usepackage[belowskip=-15pt,aboveskip=0pt]{caption}
+\DeclareMathOperator\erf{erf}
+\setlength{\intextsep}{10pt plus 2pt minus 2pt}
+\setlength{\headheight}{15pt}
+\setlength{\footskip}{10pt}
+\input{thesismods}
+\theoremstyle{definition}
+\newtheorem{example}{Example}[section]
+\DeclareGraphicsExtensions{.pdf,.jpeg,.png,.PNG}
+\usepackage[font=small]{caption}
+\setcounter{secnumdepth}{3}
+\pagestyle{fancy}
+\fancyhf{}
+\rfoot{\small \textbf{Page \thepage \hspace{1pt} of \pageref{LastPage}}}
+\lhead{Chapter\ \thechapter:\rightmark}
+\newcommand{\defaultspacing}{\onehalfspacing}
+%\onehalfspacing
+\setlength{\parskip}{0.4cm}%
+
+%Remove header from first page of each Chapter
+\makeatletter
+\renewcommand\chapter{\if@openright\cleardoublepage\else\clearpage\fi
+                    \thispagestyle{empty}% original style: plain
+                    \global\@topnum\z@
+                    \@afterindentfalse
+                    \secdef\@chapter\@schapter}
+\makeatother
+\titleformat{\chapter}
+{\normalfont\bfseries}{\chaptertitlename\ \thechapter:}{0.5em}{}
+\makeindex
+\newlength{\defaultlinespace}
+\setlength{\defaultlinespace}{\baselineskip}
+
+%includeonly{Appendix}
+
+\begin{document}
+\include{title}
+\include{Abstract}
+%\include{Preface}
+\tableofcontents
+\clearpage
+\mbox{}
+%chapter 1: Introduction
+\include{Chapter1}
+%chapter 2: Literature Review
+\include{Chapter2}
+% chapter 3: Network Measurement
+\include{Chapter3}
+%chapter 4: Beacon Software Requirements
+\include{Chapter4}
+% chapter 5:  Jitter
+\include{Chapter5}
+% chapter 6: Estimating of Network Quality, Voice Quality, and Buffer Requirements
+\include{Chapter6}
+% Appendix
+\include{Appendix}
+\renewcommand{\baselinestretch}{1}
+%\bibliographystyle{ieee}
+\begin{thebibliography}{99}
+\include{references}
+\end{thebibliography}
+\end{document}
