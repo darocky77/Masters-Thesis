@@ -1,0 +1,107 @@
+\chapter{CONCLUSIONS}
+
+\section{Research summary}
+In conclusion, given the time constraints and challenges encountered during the creation of the PEP, the non-connection breaking PEP worked adequately in the sense that it permits connectivity and in some cases shows improvement over baseline. In the experiments from the previous chapter, it is, for the most part, performing above the baseline with respect to goodput. When compared to PEPsal, our PEP is largely outperformed, especially with iperf3 transfer time. The non-connection breaking PEP does, however, show a slight improvement in total goodput with the 2000k input queues over the heavier loads (> 60 client channels) which is promising. With future modifications, we hope to improve the PEP performance considerably. \\
+
+Upon analysing the weaknesses of the PEP, one self-critique that does stand out is that we could not make the non-connection breaking PEP do enough to counter the two main problems mentioned in chapter 4, that TCP splitting/connection breaking PEPs create when they break the fundamental end to end semantics of the Internet. IPsec and VPN connections are merely forwarded through, but they also do not benefit from improved link optimisations via our PEP. The "where is the money" problem mentioned in chapter 4, also does not get any real resolution from our PEP. Our PEP does, however, reduce the probability of this problem occurring, only because it does more forwarding and less proxying/spoofing than a connection breaking PEP. This PEP could arguably be improving on a connection breaking PEP because we could say that our non-connection breaking PEP provides a statistical benefit by reducing the chance of that problem occurring. Such a claim may be hard to quantify so further testing in the future would be needed to confirm it.
+
+\section{Future Work}
+The good news is that there is much room for improvement on our PEP. Many aspects of the PEP logic could not be implemented due to time constraints. The author believes that the following modifications could make a significant improvement to our PEPs performance:\\
+
+\subsection{Manipulating the TCP flow control receiver window}
+
+The author considers this the most important future development to aim for as it should make the largest difference to the performance of the PEP but which regretfully had to be omitted for this thesis for time reasons. We aim to compute a meaningful value for the receiver's advertised window that would reflect the bandwidth delay product (BDP) of the link. The BDP, as explained previously, represents the maximum number of bytes/data that can be in transit over the satellite link at a given time ~\cite{4}~\cite{13}. \\
+
+Our current PEP configuration has a constant advertised window of 65535 bytes in any ACK the PEP itself transmits to a TCP sender. This renders the \emph{TCP flow control} receiver window (rwnd) mechanism ineffective. As a TCP congestion window (cwnd) on a connection opens, it will eventually contribute to overwhelming the link capacity of the input queue to the satellite link and any intermediate routers along the link path. The advertised window the sender sees from the remote receiver indicates no shortage of processing capacity. Future work on the advertised window via our PEP should allow us to control the amount the sender transmits by advertising a rwnd that keeps track of the data in flight on the satellite link, and thus is able to throttle the sender before it overloads the link ~\cite{17}~\cite{18}.
+
+\subsubsection{Implementing the variable receiver window for flow control}
+The general idea here is to build our own TCP flow control mechanism (see Section 2.2.1) within the PEP that can dynamically gauge the spare capacity we have left on the link and advertise this via a receive window (rwnd) in an ACK back to the senders. Note that this is only possible for us to do because we know that the receiver sits on an island and therefore the BDP on the island is determined by the satellite link bandwidth multiplied by the \emph{negligible delay} on the island ~\cite{4}. Thus the overall BDP is given more or less by that of the satellite link itself. This method would not work, for example,  with a satellite facing PEP managing a link between two large continents because we have significant terrestrial latencies on both ends ~\cite{5}.\\
+
+We know that there will be multiple active connections and senders transmitting over the link so our PEP needs to be able to advertise a rwnd that reflects the total spare link capacity divided by number of active senders ~\cite{1}~\cite{2}. \\
+
+Our existing PEP configuration has a function called {\tt processTxQueue()} which dequeues packets from an interface transmission queue (called txQueue) and transmits them via a socket send() function. \emph{Remember that for both our incoming and outgoing interfaces of our PEP, we have created a {\tt struct proxyInterface} that has a transmission queue ({\tt txQueue}) and a receive queue ({\tt rxQueue})}. Packets in the {\tt txQueue} are ready to be sent, (i.e. they have their next hop destination MAC address etc.) so they are passed to the {\tt send()} function and are also cached if they are TCP packets with a payload. \\ 
+
+To help enable a variable receive window, we could add two additional functionalities to {\tt processTxQueue()}, which would be put on the PEPs satellite-facing interface only. These functions would make use of a simple FIFO queue (linked list) to help keep track of the packets the PEP is transmitting over the link (data/bytes in flight). We could use a smaller version of our existing {\tt struct packetQueueElement} (requires less memory) which we can call {\tt byteQueueElement} that has fields which only record the size of a packet and a timestamp as shown below. \\
+
+\begin{lstlisting}
+/* Buffer element in queue that holds a packet 
+including Ethernet header */
+struct byteQueueElement {
+    uint16  packetSize;
+    struct timeval insertTime;
+    struct byteQueueElement* next;
+};
+
+/* FIFO (linked list) queue struct for packets in flight 
+on the link */
+struct bdpQueue {
+    struct byteQueueElement* head;
+    struct byteQueueElement* tail;
+    int bytesInFlight;
+};
+\end{lstlisting}
+
+We can also use a smaller version of our FIFO queue {\tt struct packetQueue} (see Appendix B) shown above as "{\tt bdpQueue}" which will help keep a tally of the data/bytes being sent out on the link. The basic concept behind this is that for every packet that our PEP sends towards the satellite link, we simultaneously enqueue a {\tt byteQueueElement}. It stores the packet size (in bytes) and records the time the packet is being sent. The {\tt bdpQueue} represents the link capacity with bdp being the acronym for \emph{bandwidth delay product}. The packets in the {\tt bdpQueue} thus represent the packets that are currently in flight, so the idea is that the byteQueueElements in the bdpQueue will represent the packets traversing the link at present.\\
+
+We maintain a variable {\tt int bytesInFlight} within bdpQueue that is initially set to 0 and incremented, by the size in bytes, of each packet enqueued at the bdpQueue. Now, we add two functions that we can call from {\tt processTxQueue()} on the satellite facing interface: \\
+
+The first function, which we can name {\tt checkByteQueueElement()}, will check the {\tt byteQueueElement} (if any) at the head of the {\tt bdpQueue}. If the element's timestamp is younger than the satellite link RTT, the function just returns. If the element's timestamp is older than the RTT, it dequeues the {\tt byteQueueElement} and deducts the value of its size field from {\tt bytesInFlight}. It then disposes of the {\tt byteQueueElement}. \\
+
+The second function can be named {\tt makeByteQueueElement()}. The {\tt packetQueueElement} for the packet that has just been sent, is taken as a parameter for this function. A {\tt byteQueueElement} is then created with the size parameter set to the size of the packet from the {\tt packetQueueElement} and the timestamp is set to the current time. The {\tt byteQueueElement} is enqueued on the {\tt bdpQueue}. The size of {\tt byteQueueElement} is added to {\tt bytesInFlight} to represent the total number of bytes on the link.
+
+We would call the {\tt checkByteQueueElement()} function first to see if any older packets need to be removed from the {\tt bdpqueue} right before we call {\tt send()} on any packet in {\tt txQueue}. We then call {\tt makeByteQueueElement()} immediately afterwards to add the record of that sent packet (size in bytes) originating from {\tt txtQueue}, to our {\tt bdpQueue}. Actioning these calls in this order, firstly ensures that the {\tt byteQueueElement}'s are removed from bdpQueue if they have been enqueued longer than RTT. Secondly, it allows us to add a {\tt byteQueueElement} bdpQueue for every packet we send out on the PEP. So we are recording the bdpQueue's size increments and decrements, by incrementing and decrementing our bytesInFlight value accordingly. Thus we obtain a relatively accurate estimate of the number of bytes currently in flight over the link (ignoring for a moment the possibility that some of them may be in packets that the satellite link input queue drops). 
+
+Hence, using bytesInFlight, we can almost accurately gauge two likely scenarios on the link. Firstly, if our bytesInFlight value exceeds the link BDP (link bandwidth x RTT => Pacific island region BDP = 16Mbs x 500 ms = 1MB) which is roughly 1MB in our case, then we can probably assume that our satellite input queues may be overflowing. This would trigger the action in our code to stop our PEP from sending which at this time of writing is planned to be an advertised rwnd action (advertised rwnd of zero in this case) as mentioned earlier. \\
+
+The second scenario is that our bytesInFlight is below than BDP so we can calculate the spare capacity on the link by subtracting the bytesInFlight value from the BDP. The difference is a number that denotes the amount of data the link could currently handle without getting overloaded. This spare capacity is what we want our PEP to advertise to the senders via rwnd. As there will usually be multiple senders at any one time across the link, we would need to distribute that spare capacity across our active connections. Otherwise, we will encounter the same congestion problems with the senders not having an accurate view of the link's capacity.\\
+
+We propose to divide the spare capacity by the number of active connections to obtain a shared value. If the result is bigger than 65535, then we are content to keep our constant as it is. However, if not, we need to insert that shared value into the advertised window of the subsequent ACKs that our PEP sends out. \\
+
+\textbf{Example:}\\
+
+A typical BDP for a Pacific Island network reliant on a geostationary satellite for Internet and with a link rate of 16Mbps is 1 MB [4][5]. Let us suppose that the current bytes in flight value is 400,000 and we have 60 active connections. Then we can calculate a shared value for the rwnd as 400,000 bytes divided by 60 for a shared value of 10,000 per connection, which is < 65535. Therefore we would advertise a receive window of 10,000 in our reply ACKs.\\
+
+This approach doesn't take into account that many connections would not transfer that amount by the time they have completed, so we can be a bit more generous with those that do.
+ 
+ \subsection{Increasing the speed and efficiency of ARP table look ups}
+At the moment our ARP table and TCP connection table and cache use binary search trees (BST) as the main data structure. In future implementations, we could look at a faster more efficient search data structure like self balancing binary search trees or heap/hash tables for instance [42][43]. \\
+
+\subsection{Restructuring the cache FIFO packet queues}
+We could restructure the cache so that each packet is stored with the expiry time as key in a max heap rather than a BST, with the root being the packet that needs to be retransmitted first. This should ease the housekeeping burden [43].
+
+\section{Limitations of the study?}
+
+The results of this research can be applied specifically to many parts of the Pacific Islands region and also has some general applicability to other remote locations, such as oil rigs, (cruise) ships or planes where multiple TCP users have to share the satellite link. This section will highlight the limitations of this study as they affect the ability to generalise the thesis results across a wider scope. The limitations are as follows:
+
+\begin{enumerate}
+\item This study only tested for simulated geostationary satellite links.  The results cannot be applied to communities connected via MEO satellites for Internet connectivity. 
+\item The experiments run on the satellite simulator testbed only tested for links with 16 Mbps in both directions and not for other bandwidths. There may be some uncertainty on how the PEP would react to vastly different bandwidths. Note that this is not so much a limitation of the PEP as such but a result of limited availability of the simulator, which was also being used for other experiments not related to this thesis.
+\item Implementation of the variable advertised window (rwnd) for our PEP had to be shifted to future work. This codebase is a platform for further development, so the variable rwnd will be a feature that can be added later to improve the PEP performance. 
+\item The optimisation of the RTT estimation algorithm would have required many more experiments for a better result. Unfortunately, there was not enough experiment time available on the simulator within the time frame of the thesis.
+\end{enumerate}
+
+\section{Final summation and recommendations}
+
+This thesis has presented the first Linux based non-connection breaking PEP approach that is designed specifically for the Pacific Island regions reliant on narrowband satellite link provided Internet. The PEP currently provides small goodput gains for long downloads and is intended as a platform for further ongoing development with future work. The ultimate goal was to provide an inexpensive open-source PEP solution/platform for satellite-dependent parts of the Pacific Islands region that has the added bonus of not violating the fundamental end to end semantics of TCP. This goal has been achieved to an extent, and future work modifications are planned to improve the PEP performance (See Future Work section). To summarise, the PEP in this thesis has:
+
+\begin{itemize}
+\item provided a platform for an affordable open-source Linux based non-connection breaking PEP tailored for the Pacific island environment.
+\item provided a platform going forward to deal with the issues created by TCP splitting/connection breaking PEPs when they break the end to end semantics of TCP. 
+
+Namely:
+
+  \begin{enumerate}
+   \item the inability to deal with encrypted TCP flows      (example: IPsec) or VPN 
+   \item the issue of false acknowledgements. Recall the     "where is the money" problem mentioned earlier whereby the PEP acknowledges back to a sender that a particular transfer has been received by the intended target. A problem arises when there is a technical problem on the receiver side, and they do not get the data for some reason. The sender will then falsely believe that the data has been received by the target.
+  \end{enumerate}
+
+\item been successfully tested against PEPsal and baseline in the University of Auckland satellite simulator and shown to have small gains in goodput for long downloads.
+\item been scheduled for future work to build on the non-connection aspect of the PEP.
+\end{itemize}
+
+\subsection*{Recommendations}
+Further testing on the satellite simulator with different bandwidths, refinement of the RTT recalculation, as well as experimentation with other types of satellites  (example: MEO) will also be beneficial going forward. As explained in Section 6.1 of these conclusions, the full potential of the non-connection breaking aspect of this PEP has not been yet reached. At this stage of development, our non-connection breaking PEP partially addresses the concerns of breaking the fundamental end to end rule of the Internet. There is still room for improvement.
+
+
+
+
